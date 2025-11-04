@@ -286,6 +286,10 @@ impl WindowContext {
         // Always reload the theme to account for auto-theme switching.
         self.display.window.set_theme(self.config.window.theme());
 
+        // Set Windows title bar color to match primary background color.
+        #[cfg(windows)]
+        self.display.window.set_title_bar_color(self.config.colors.primary.background);
+
         // Update display if either padding options or resize increments were changed.
         let window_config = &old_config.window;
         if window_config.padding(1.) != self.config.window.padding(1.)

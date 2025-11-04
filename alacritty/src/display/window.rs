@@ -32,6 +32,13 @@ use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 #[cfg(windows)]
 use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::HWND,
+    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR},
+};
+#[cfg(windows)]
+use std::ffi::c_void;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{
     CursorIcon, Fullscreen, ImePurpose, Theme, UserAttentionType, Window as WinitWindow,
@@ -44,6 +51,8 @@ use crate::cli::WindowOptions;
 use crate::config::UiConfig;
 use crate::config::window::{Decorations, Identity, WindowConfig};
 use crate::display::SizeInfo;
+#[cfg(windows)]
+use crate::display::color::Rgb;
 
 /// Window icon for `_NET_WM_ICON` property.
 #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
@@ -204,20 +213,23 @@ impl Window {
         log::info!("Window scale factor: {scale_factor}");
         let is_x11 = matches!(window.window_handle().unwrap().as_raw(), RawWindowHandle::Xlib(_));
 
-        Ok(Self {
-            current_mouse_cursor,
-            scale_factor,
-            is_x11,
-            window,
+        let window_instance = Self {
             hold: options.terminal_options.hold,
             requested_redraw: false,
             text_input_active: true,
             title: identity.title,
             mouse_visible: true,
             has_frame: true,
-            pointer_focused: Default::default(),
-            touch_focused: Default::default(),
-        })
+            scale_factor,
+            window,
+            is_x11,
+        };
+
+        // Set Windows title bar color to match primary background color.
+        #[cfg(windows)]
+        window_instance.set_title_bar_color(config.colors.primary.background);
+
+        Ok(window_instance)
     }
 
     #[inline]
@@ -282,7 +294,7 @@ impl Window {
             self.window.set_cursor_visible(visible);
         }
     }
-
+    
     #[inline]
     pub fn mouse_visible(&self) -> bool {
         self.mouse_visible
@@ -331,6 +343,27 @@ impl Window {
             .with_decorations(window_config.decorations != Decorations::None)
             .with_window_icon(icon.as_ref().ok().cloned())
             .with_taskbar_icon(icon.ok())
+    }
+
+    /// Set the title bar color on Windows using DWM API.
+    #[cfg(windows)]
+    pub fn set_title_bar_color(&self, color: Rgb) {
+        let hwnd = match self.raw_window_handle() {
+            RawWindowHandle::Win32(handle) => handle.hwnd.get() as HWND,
+            _ => return,
+        };
+
+        // Convert RGB to Windows COLORREF format (0x00BBGGRR)
+        let colorref = (color.b as u32) << 16 | (color.g as u32) << 8 | (color.r as u32);
+
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_CAPTION_COLOR as u32,
+                &colorref as *const u32 as *const c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]
